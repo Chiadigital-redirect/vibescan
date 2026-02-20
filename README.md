@@ -1,36 +1,65 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# VibeScan 🛡️
 
-## Getting Started
+**Security scanner for AI/vibe-coded apps.**
 
-First, run the development server:
+VibeScan helps founders who built their app with Lovable, Bolt, Cursor, V0, or any other AI coding tool to quickly discover common security issues — before their users (or attackers) do.
+
+## What it does
+
+Enter any publicly accessible URL and VibeScan will run a series of **passive checks** (standard HTTP requests only) and return a plain-English security report with:
+
+- 🗺️ **Page discovery** — every URL visible via sitemap, robots.txt, and links
+- 🔑 **API key detection** — searches JavaScript bundles for exposed keys (OpenAI, Stripe, Supabase, Google)
+- 🛡️ **Security headers** — checks for HSTS, CSP, X-Frame-Options, and more
+- 🚪 **Sensitive file exposure** — tests for publicly accessible `.env`, `.git/config`, `package.json`, etc.
+- 🌐 **CORS policy** — detects wide-open CORS that lets any site call your API
+- 🔒 **SSL/HTTPS** — verifies your site uses encrypted connections
+
+Every finding includes:
+- A plain-English headline ("Your API key is exposed in your code")
+- A simple explanation ("Anyone can read your OpenAI key and run up your bill")
+- A severity rating (🔴 urgent / 🟡 warning / 🟢 pass)
+- A ready-to-use **fix prompt** you can paste into Lovable, Cursor, Bolt, or ChatGPT
+
+## What it does NOT do
+
+- ❌ No penetration testing or active exploitation
+- ❌ No authentication bypass attempts
+- ❌ No SQL injection, XSS probing, or fuzzing
+- ❌ No rate-limit hammering or stress testing
+- ❌ No modification of your app or data
+- ❌ No storage of scan results (scans are completely stateless)
+
+VibeScan only reads what any ordinary browser would read. **You should only scan sites you own or have permission to scan.**
+
+## Stack
+
+- **Framework:** Next.js 14 (App Router)
+- **Styling:** Tailwind CSS
+- **Deployment:** Vercel
+- **Auth/DB:** None required — all scans are stateless
+
+## Getting started
 
 ```bash
+# Install dependencies
+npm install
+
+# Run locally
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+
+# Build for production
+npm run build
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+No environment variables required for the MVP.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Design philosophy
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+VibeScan is designed for **non-technical founders**, not security professionals. Every finding is explained in plain English, and fix prompts are written specifically for AI coding tools (Lovable, Cursor, Bolt, ChatGPT).
 
-## Learn More
+The design is light, clean, and friendly — not a dark-mode hacker terminal.
 
-To learn more about Next.js, take a look at the following resources:
+## By
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Built by [Creative Digital Group](https://creativedigital.group).
