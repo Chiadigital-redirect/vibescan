@@ -31,6 +31,15 @@ interface DataLeaks {
   openTables: number;
 }
 
+interface ExposedDataItem {
+  kind: 'file' | 'secret' | 'database';
+  label: string;
+  description: string;
+  preview?: string;
+  severity: 'critical' | 'warning';
+  dataLeaks?: DataLeaks;
+}
+
 interface ScanReport {
   url: string;
   scannedAt: string;
@@ -197,6 +206,116 @@ function CheckCard({
   );
 }
 
+function ExposedDataCard({ item }: { item: ExposedDataItem }) {
+  const [expandedTable, setExpandedTable] = useState<string | null>(null);
+
+  const borderColor = item.severity === 'critical' ? 'border-red-200 bg-red-50' : 'border-amber-200 bg-amber-50';
+  const badgeColor = item.severity === 'critical' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700';
+  const emoji = item.kind === 'database' ? '🗄️' : item.kind === 'secret' ? '🔑' : '📄';
+
+  // For database kind, initialise first table expanded
+  const tables = item.dataLeaks?.tables.filter(t => t.sampleRows.length > 0) ?? [];
+  const activeTable = expandedTable ?? (tables.length > 0 ? tables[0].name : null);
+
+  return (
+    <div className={`border-2 rounded-xl overflow-hidden ${borderColor}`}>
+      {/* Card header */}
+      <div className="px-5 py-4 flex items-start gap-3">
+        <span className="text-2xl flex-shrink-0">{emoji}</span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap mb-1">
+            <span className="font-bold text-slate-900">{item.label}</span>
+            <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${badgeColor}`}>
+              {item.severity === 'critical' ? '🔴 Critical' : '🟡 Warning'}
+            </span>
+          </div>
+          <p className="text-sm text-slate-600 leading-relaxed">{item.description}</p>
+          {item.preview && (
+            <div className="mt-2">
+              <span className="text-xs text-slate-400 mr-1">Found:</span>
+              <span className="font-mono text-xs bg-white border border-slate-200 px-2 py-0.5 rounded text-slate-700">{item.preview}</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Database: show actual table data */}
+      {item.kind === 'database' && item.dataLeaks && tables.length > 0 && (
+        <div className="border-t border-red-200">
+          {/* Context bar */}
+          <div className="px-4 py-2 bg-red-100 flex items-center gap-2 text-xs text-red-800 font-medium">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+            We queried your live database using the anon key found in your JavaScript.
+            Showing real rows — emails partially redacted.
+          </div>
+
+          {/* Table tabs */}
+          <div className="flex border-b border-red-200 bg-white overflow-x-auto">
+            {tables.map(table => (
+              <button
+                key={table.name}
+                onClick={() => setExpandedTable(table.name)}
+                className={`px-4 py-2.5 text-sm font-semibold whitespace-nowrap border-b-2 transition-colors flex items-center gap-2 ${
+                  activeTable === table.name
+                    ? 'border-red-500 text-red-700 bg-red-50'
+                    : 'border-transparent text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                🗄️ {table.name}
+                {table.totalRows !== undefined && (
+                  <span className="text-xs bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-full font-bold">
+                    {table.totalRows.toLocaleString()}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          {/* Table data */}
+          {tables.map(table => activeTable === table.name && (
+            <div key={table.name} className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-100">
+                    {table.columns.map(col => (
+                      <th key={col} className="px-4 py-2.5 text-left text-xs font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap font-mono">
+                        {col}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50 bg-white">
+                  {table.sampleRows.map((row, ri) => (
+                    <tr key={ri} className="hover:bg-slate-50">
+                      {table.columns.map(col => {
+                        const val = redactValue(col, row[col]);
+                        return (
+                          <td key={col} className={`px-4 py-2.5 whitespace-nowrap font-mono text-xs ${val === '●●●●●●●●' ? 'text-slate-300' : 'text-slate-700'}`}>
+                            {val}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="px-4 py-2.5 bg-white border-t border-slate-100 text-xs text-slate-500 flex items-center justify-between">
+                <span>Showing {table.sampleRows.length} of {table.totalRows?.toLocaleString() ?? '?'} rows</span>
+                <a href="https://supabase.com/docs/guides/auth/row-level-security" target="_blank" rel="noopener noreferrer"
+                  className="text-orange-600 font-semibold hover:text-orange-700">
+                  How to fix with RLS →
+                </a>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DiscoveredUrlsSection({ urls }: { urls: string[] }) {
   const [showAll, setShowAll] = useState(false);
 
@@ -341,173 +460,6 @@ function redactValue(col: string, value: unknown): string {
   return str;
 }
 
-function DataLeaksSection({ dataLeaks }: { dataLeaks: DataLeaks }) {
-  const [expandedTable, setExpandedTable] = useState<string | null>(
-    dataLeaks.tables.length > 0 ? dataLeaks.tables[0].name : null
-  );
-
-  const openTables = dataLeaks.tables.filter(t => t.sampleRows.length > 0);
-  const emptyTables = dataLeaks.tables.filter(t => t.sampleRows.length === 0);
-
-  if (openTables.length === 0 && emptyTables.length === 0) return null;
-
-  return (
-    <section>
-      {/* Banner */}
-      <div className="bg-red-50 border-2 border-red-200 rounded-2xl p-6 mb-4">
-        <div className="flex items-start gap-4">
-          <div className="text-3xl flex-shrink-0 mt-0.5">🚨</div>
-          <div>
-            <h2 className="text-xl font-extrabold text-red-900 mb-1">
-              Your database is open to the internet
-            </h2>
-            <p className="text-red-700 text-sm leading-relaxed">
-              We used your exposed Supabase anon key to query your live database — the same way any attacker could.{' '}
-              {openTables.length > 0 && (
-                <>
-                  <strong>{openTables.length} {openTables.length === 1 ? 'table' : 'tables'} returned real data.</strong>{' '}
-                  Row Level Security (RLS) is not configured on {openTables.length === 1 ? 'this table' : 'these tables'}.
-                  Anyone who finds your key can read, and potentially write, this data right now.
-                </>
-              )}
-            </p>
-            <div className="mt-3 flex flex-wrap gap-2 text-xs">
-              <span className="bg-red-100 text-red-700 border border-red-200 px-2.5 py-1 rounded-full font-mono">
-                {dataLeaks.supabaseUrl}
-              </span>
-              <span className="bg-red-100 text-red-700 border border-red-200 px-2.5 py-1 rounded-full font-mono">
-                anon key: {dataLeaks.keyPreview}
-              </span>
-              <span className="bg-red-100 text-red-700 border border-red-200 px-2.5 py-1 rounded-full font-semibold">
-                {dataLeaks.tablesFound} tables found · {openTables.length} open
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Table tabs */}
-      {openTables.length > 0 && (
-        <div className="bg-white border border-red-200 rounded-xl overflow-hidden">
-          {/* Tab row */}
-          <div className="flex items-center gap-0 border-b border-slate-100 overflow-x-auto">
-            {openTables.map((table) => (
-              <button
-                key={table.name}
-                onClick={() => setExpandedTable(expandedTable === table.name ? null : table.name)}
-                className={`px-4 py-3 text-sm font-semibold border-b-2 transition-colors whitespace-nowrap flex items-center gap-2 ${
-                  expandedTable === table.name
-                    ? 'border-red-500 text-red-700 bg-red-50'
-                    : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50'
-                }`}
-              >
-                <span className="text-base">🗄️</span>
-                {table.name}
-                {table.totalRows !== undefined && (
-                  <span className={`text-xs px-1.5 py-0.5 rounded-full font-bold ${
-                    expandedTable === table.name
-                      ? 'bg-red-100 text-red-700'
-                      : 'bg-slate-100 text-slate-500'
-                  }`}>
-                    {table.totalRows.toLocaleString()} rows
-                  </span>
-                )}
-              </button>
-            ))}
-            {emptyTables.length > 0 && (
-              <div className="px-4 py-3 text-xs text-slate-400 whitespace-nowrap border-b-2 border-transparent">
-                +{emptyTables.length} empty {emptyTables.length === 1 ? 'table' : 'tables'}
-              </div>
-            )}
-          </div>
-
-          {/* Table data */}
-          {openTables.map((table) => (
-            expandedTable === table.name && table.columns.length > 0 && (
-              <div key={table.name}>
-                {/* Scary context bar */}
-                <div className="px-4 py-2.5 bg-red-50 border-b border-red-100 flex items-center gap-2 text-xs text-red-700">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <circle cx="12" cy="12" r="10"/>
-                    <line x1="12" y1="8" x2="12" y2="12"/>
-                    <line x1="12" y1="16" x2="12.01" y2="16"/>
-                  </svg>
-                  <span>
-                    <strong>These are real rows from your live database.</strong>{' '}
-                    We queried this with your public anon key — no login required.
-                    {table.totalRows !== undefined && table.totalRows > 3 && (
-                      <> Showing 3 of {table.totalRows.toLocaleString()} rows.</>
-                    )}
-                    {' '}Emails and sensitive fields are partially redacted for display.
-                  </span>
-                </div>
-
-                {/* Data table */}
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="bg-slate-50 border-b border-slate-100">
-                        {table.columns.map((col) => (
-                          <th
-                            key={col}
-                            className="px-4 py-2.5 text-left text-xs font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap font-mono"
-                          >
-                            {col}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-50">
-                      {table.sampleRows.map((row, rowIdx) => (
-                        <tr key={rowIdx} className="hover:bg-slate-50 transition-colors">
-                          {table.columns.map((col) => {
-                            const val = redactValue(col, row[col]);
-                            const isRedacted = val === '●●●●●●●●';
-                            return (
-                              <td
-                                key={col}
-                                className={`px-4 py-2.5 whitespace-nowrap font-mono text-xs ${
-                                  isRedacted
-                                    ? 'text-slate-300'
-                                    : 'text-slate-700'
-                                }`}
-                              >
-                                {isRedacted ? (
-                                  <span className="tracking-wider">{val}</span>
-                                ) : (
-                                  val
-                                )}
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Fix CTA */}
-                <div className="px-4 py-3 border-t border-slate-100 bg-white flex items-center justify-between flex-wrap gap-3">
-                  <p className="text-xs text-slate-500">
-                    Fix: Enable Row Level Security (RLS) on the <span className="font-mono font-bold">{table.name}</span> table in your Supabase dashboard.
-                  </p>
-                  <a
-                    href="https://supabase.com/docs/guides/auth/row-level-security"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs font-bold text-orange-600 hover:text-orange-700 flex items-center gap-1 whitespace-nowrap"
-                  >
-                    RLS docs →
-                  </a>
-                </div>
-              </div>
-            )
-          ))}
-        </div>
-      )}
-    </section>
-  );
-}
 
 function LoadingTerminal({ targetUrl }: { targetUrl: string }) {
   const [stepIndex, setStepIndex] = useState(0);
@@ -680,6 +632,41 @@ function ScanPageInner() {
   const warningChecks = report.checks.filter(c => c.status === 'warning');
   const passChecks = report.checks.filter(c => c.status === 'pass');
 
+  // Build unified exposed data items from checks + dataLeaks
+  const exposedItems: ExposedDataItem[] = [];
+
+  // Pull exposed files/paths from checks
+  for (const check of report.checks) {
+    if (check.id.startsWith('exposure-') && check.status !== 'pass' && check.value) {
+      exposedItems.push({
+        kind: 'file',
+        label: check.value,
+        description: check.detail,
+        severity: check.status as 'critical' | 'warning',
+      });
+    }
+    if (check.id.startsWith('secret-') && check.status !== 'pass') {
+      exposedItems.push({
+        kind: 'secret',
+        label: check.name,
+        description: check.detail,
+        preview: check.value,
+        severity: check.status as 'critical' | 'warning',
+      });
+    }
+  }
+
+  // Pull Supabase live table data
+  if (report.dataLeaks && report.dataLeaks.openTables > 0) {
+    exposedItems.push({
+      kind: 'database',
+      label: `Live database — ${report.dataLeaks.openTables} open ${report.dataLeaks.openTables === 1 ? 'table' : 'tables'}`,
+      description: `Anyone with your anon key can query ${report.dataLeaks.openTables} table(s) — no login required.`,
+      severity: 'critical',
+      dataLeaks: report.dataLeaks,
+    });
+  }
+
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Nav */}
@@ -722,15 +709,14 @@ function ScanPageInner() {
       </nav>
 
       <main className="max-w-5xl mx-auto px-4 sm:px-6 py-10 space-y-10">
-        {/* Header */}
+
+        {/* ── SECTION 1: Score card ── */}
         <div className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-10">
           <p className="text-xs text-slate-400 font-semibold uppercase tracking-widest mb-2">Security Report</p>
           <h1 className="text-xl sm:text-2xl font-bold text-slate-900 mb-1 break-all font-mono">{report.url}</h1>
           <p className="text-slate-400 text-sm mb-8">
             Scanned {new Date(report.scannedAt).toLocaleString()} · Passive scan only
           </p>
-
-          {/* Score — large, centered */}
           <div className="flex flex-col items-center mb-4">
             <ScoreBadge score={report.score} />
             <SummaryBar
@@ -741,78 +727,115 @@ function ScanPageInner() {
           </div>
         </div>
 
-        {/* Critical findings */}
-        {criticalChecks.length > 0 && (
-          <section>
-            <div className="flex items-center gap-2 mb-4">
-              <span className="text-xl">🔴</span>
-              <h2 className="text-lg font-bold text-slate-900">Urgent — fix these today</h2>
-              <span className="bg-red-100 text-red-700 text-xs font-bold px-2 py-0.5 rounded-full">{criticalChecks.length}</span>
-            </div>
-            <div className="space-y-3">
-              {criticalChecks.map(check => (
-                <CheckCard key={check.id} check={check} onFixClick={handleFixClick} />
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* Live data leaks — most impactful, shown right after critical */}
-        {report.dataLeaks && (report.dataLeaks.openTables > 0 || report.dataLeaks.tablesFound > 0) && (
-          <DataLeaksSection dataLeaks={report.dataLeaks} />
-        )}
-
-        {/* Warnings */}
-        {warningChecks.length > 0 && (
-          <section>
-            <div className="flex items-center gap-2 mb-4">
-              <span className="text-xl">🟡</span>
-              <h2 className="text-lg font-bold text-slate-900">Worth fixing soon</h2>
-              <span className="bg-amber-100 text-amber-700 text-xs font-bold px-2 py-0.5 rounded-full">{warningChecks.length}</span>
-            </div>
-            <div className="space-y-3">
-              {warningChecks.map(check => (
-                <CheckCard key={check.id} check={check} onFixClick={handleFixClick} />
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* Discovered URLs */}
+        {/* ── SECTION 2: Pages found (always visible) ── */}
         <section>
-          <div className="mb-3">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-xl">🗺️</span>
-              <h2 className="text-lg font-bold text-slate-900">
-                {report.discoveredUrls.length === 1
-                  ? '1 page found on your app'
-                  : `${report.discoveredUrls.length} pages found on your app`}
-              </h2>
-            </div>
-            <p className="text-slate-500 text-sm ml-8">
-              Some of these might surprise you — check that each one should be publicly accessible.
-            </p>
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-xl">🗺️</span>
+            <h2 className="text-lg font-bold text-slate-900">
+              Pages found on your app
+            </h2>
+            {report.discoveredUrls.length > 0 && (
+              <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded-full">
+                {report.discoveredUrls.length}
+              </span>
+            )}
           </div>
-          <div className="bg-white border border-slate-200 rounded-xl p-4">
-            <DiscoveredUrlsSection urls={report.discoveredUrls} />
-          </div>
+          <p className="text-slate-500 text-sm ml-8 mb-3">
+            Every URL we could find — via sitemap, robots.txt, and your JavaScript bundles.
+            Check that each one should be publicly reachable.
+          </p>
+          <DiscoveredUrlsSection urls={report.discoveredUrls} />
         </section>
 
-        {/* Passed checks */}
-        {passChecks.length > 0 && (
-          <section>
-            <div className="flex items-center gap-2 mb-4">
-              <span className="text-xl">🟢</span>
-              <h2 className="text-lg font-bold text-slate-900">Checks you passed</h2>
-              <span className="bg-green-100 text-green-700 text-xs font-bold px-2 py-0.5 rounded-full">{passChecks.length}</span>
+        {/* ── SECTION 3: Data leaking (always visible) ── */}
+        <section>
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-xl">🔓</span>
+            <h2 className="text-lg font-bold text-slate-900">Data leaking from your app</h2>
+            {exposedItems.length > 0 && (
+              <span className="bg-red-100 text-red-700 text-xs font-bold px-2 py-0.5 rounded-full">
+                {exposedItems.length} {exposedItems.length === 1 ? 'leak' : 'leaks'}
+              </span>
+            )}
+          </div>
+          <p className="text-slate-500 text-sm ml-8 mb-3">
+            Credentials, secrets, and live database rows that are publicly visible right now.
+          </p>
+
+          {exposedItems.length === 0 ? (
+            <div className="bg-green-50 border border-green-200 rounded-xl p-6 flex items-center gap-4">
+              <span className="text-3xl">✅</span>
+              <div>
+                <p className="font-bold text-green-800">No data leaks detected</p>
+                <p className="text-green-700 text-sm mt-0.5">
+                  We couldn&apos;t find any exposed credentials, secrets, or open database tables.
+                </p>
+              </div>
             </div>
-            <div className="space-y-3">
-              {passChecks.map(check => (
-                <CheckCard key={check.id} check={check} onFixClick={handleFixClick} />
+          ) : (
+            <div className="space-y-4">
+              {exposedItems.map((item, i) => (
+                <ExposedDataCard key={i} item={item} />
               ))}
             </div>
-          </section>
-        )}
+          )}
+        </section>
+
+        {/* ── SECTION 4: Security risks ── */}
+        <section>
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-xl">🛡️</span>
+            <h2 className="text-lg font-bold text-slate-900">Security risks</h2>
+          </div>
+          <p className="text-slate-500 text-sm ml-8 mb-4">
+            Headers, HTTPS, CORS, and other security configuration issues.
+          </p>
+
+          {criticalChecks.length > 0 && (
+            <div className="mb-6">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-base">🔴</span>
+                <h3 className="font-bold text-slate-800">Urgent — fix these today</h3>
+                <span className="bg-red-100 text-red-700 text-xs font-bold px-2 py-0.5 rounded-full">{criticalChecks.length}</span>
+              </div>
+              <div className="space-y-3">
+                {criticalChecks.map(check => (
+                  <CheckCard key={check.id} check={check} onFixClick={handleFixClick} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {warningChecks.length > 0 && (
+            <div className="mb-6">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-base">🟡</span>
+                <h3 className="font-bold text-slate-800">Worth fixing soon</h3>
+                <span className="bg-amber-100 text-amber-700 text-xs font-bold px-2 py-0.5 rounded-full">{warningChecks.length}</span>
+              </div>
+              <div className="space-y-3">
+                {warningChecks.map(check => (
+                  <CheckCard key={check.id} check={check} onFixClick={handleFixClick} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {passChecks.length > 0 && (
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-base">🟢</span>
+                <h3 className="font-bold text-slate-800">Checks you passed</h3>
+                <span className="bg-green-100 text-green-700 text-xs font-bold px-2 py-0.5 rounded-full">{passChecks.length}</span>
+              </div>
+              <div className="space-y-3">
+                {passChecks.map(check => (
+                  <CheckCard key={check.id} check={check} onFixClick={handleFixClick} />
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
 
         {/* CTA */}
         <section className="bg-orange-50 border border-orange-100 rounded-2xl p-8 text-center">
