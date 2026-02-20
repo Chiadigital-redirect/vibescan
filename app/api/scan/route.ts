@@ -20,7 +20,7 @@ const SENSITIVE_PATHS = [
   '/phpinfo.php',
 ];
 
-const SECRET_PATTERNS: { name: string; pattern: RegExp; severity: 'critical' | 'warning' }[] = [
+const SECRET_PATTERNS: { name: string; pattern: RegExp; severity: 'critical' | 'warning'; isServiceRole?: boolean }[] = [
   { name: 'Supabase URL', pattern: /SUPABASE_URL|supabase\.co/g, severity: 'warning' },
   { name: 'OpenAI API Key', pattern: /sk-[a-zA-Z0-9]{40,}/g, severity: 'critical' },
   { name: 'Stripe Live Key', pattern: /pk_live_[a-zA-Z0-9]+|sk_live_[a-zA-Z0-9]+/g, severity: 'critical' },
@@ -330,15 +330,39 @@ async function detectApiKeys(baseUrl: string): Promise<ApiKeyFinding[]> {
               severity,
             };
 
-            // If this is a Supabase JWT, attach the URL too for data exposure check
+            // If this is a Supabase JWT, decode it to check if it's anon or service_role
             if (name === 'Supabase JWT' && detectedSupabaseUrl) {
-              // Grab the full key value (not just first 8 chars)
               pattern.lastIndex = 0;
-              const fullMatch = jsContent.match(pattern);
-              if (fullMatch) {
-                finding.supabaseUrl = detectedSupabaseUrl;
-                finding.supabaseKey = fullMatch[0];
-                detectedSupabaseKey = fullMatch[0];
+              const fullMatches = jsContent.match(pattern) || [];
+              for (const fullKey of fullMatches) {
+                try {
+                  const parts = fullKey.split('.');
+                  if (parts.length >= 2) {
+                    const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
+                    if (payload.role === 'service_role') {
+                      // SERVICE ROLE KEY — this bypasses ALL RLS, much worse
+                      findings.push({
+                        type: 'Supabase Service Role Key',
+                        preview: fullKey.substring(0, 8) + '...',
+                        severity: 'critical',
+                        supabaseUrl: detectedSupabaseUrl,
+                        supabaseKey: fullKey,
+                      });
+                    } else if (payload.role === 'anon' || payload.iss === 'supabase') {
+                      // Anon key — respects RLS but still dangerous if tables aren't protected
+                      finding.supabaseUrl = detectedSupabaseUrl;
+                      finding.supabaseKey = fullKey;
+                      detectedSupabaseKey = fullKey;
+                    }
+                  }
+                } catch {
+                  // Fallback: treat first match as anon key
+                  if (!detectedSupabaseKey) {
+                    finding.supabaseUrl = detectedSupabaseUrl;
+                    finding.supabaseKey = fullKey;
+                    detectedSupabaseKey = fullKey;
+                  }
+                }
               }
             }
 
@@ -665,12 +689,15 @@ async function runScan(baseUrl: string) {
     });
   } else {
     for (const key of keys) {
+      const isServiceRole = key.type === 'Supabase Service Role Key';
       checks.push({
         id: `secret-${key.type.toLowerCase().replace(/\s/g, '-')}`,
         category: 'secrets',
-        name: `Exposed: ${key.type}`,
+        name: isServiceRole ? '🚨 Supabase Service Role Key Exposed' : `Exposed: ${key.type}`,
         status: key.severity,
-        detail: `A ${key.type} was found in public JavaScript. Rotate this key immediately.`,
+        detail: isServiceRole
+          ? `CRITICAL: Your Supabase service_role key is in public JavaScript. This key bypasses ALL Row Level Security — every table, every row, no restrictions. Anyone who has this key owns your entire database.`
+          : `A ${key.type} was found in public JavaScript. Rotate this key immediately.`,
         value: key.preview,
       });
     }

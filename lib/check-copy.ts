@@ -252,6 +252,14 @@ export const checkCopy: Record<string, CheckCopy> = {
     fixPromptWarning: 'After making this change, any frontend code that directly used this variable will break. Make sure you move the usage to a server-side API route first.',
   },
 
+  // Supabase service role key — bypasses ALL RLS
+  'secrets-supabase-service-role-key': {
+    headline: 'Your Supabase master key is exposed — RLS means nothing',
+    plainEnglish: "You have two types of Supabase keys: the anon key (which respects your security rules) and the service role key (which bypasses ALL of them). Your service role key is sitting in your public JavaScript right now. Anyone who finds it has full, unrestricted read/write/delete access to your entire database — every user, every payment, every record — with zero restrictions. This is the worst possible Supabase exposure.",
+    fixPrompt: `My Supabase service_role key is exposed in my frontend JavaScript. This bypasses all Row Level Security. Move it to server-side only immediately: 1) Remove it from any frontend code or NEXT_PUBLIC_ variables 2) Only use it in API routes with the secret stored in a non-public environment variable (no NEXT_PUBLIC_ prefix). Create a server-side API route to handle operations that needed the service_role key. Only create or modify server-side files — do not touch any frontend files.`,
+    fixPromptWarning: 'Rotate the service_role key in your Supabase dashboard immediately — treat it as fully compromised. Then audit your database for any unexpected changes.',
+  },
+
   // Supabase data exposure
   'supabase-data-exposure': {
     headline: 'Anyone can read your database right now',

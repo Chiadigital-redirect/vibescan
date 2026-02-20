@@ -141,6 +141,7 @@ function CheckCard({
       if (check.id.includes('stripe-live')) return 'secrets-stripe-live-key';
       if (check.id.includes('stripe-test')) return 'secrets-stripe-test-key';
       if (check.id.includes('google')) return 'secrets-google-api-key';
+      if (check.id.includes('supabase-service-role')) return 'secrets-supabase-service-role-key';
       if (check.id.includes('supabase-url')) return 'secrets-supabase-url';
       if (check.id.includes('supabase-jwt')) return 'secrets-supabase-jwt';
       if (check.id.includes('next-public')) return 'secrets-next-public-secret';
