@@ -111,7 +111,7 @@ async function discoverUrls(baseUrl: string): Promise<string[]> {
   } catch {}
 
   // 3. Homepage — extract links AND JS bundle URLs
-  let jsBundleUrls: string[] = [];
+  const jsBundleUrls: string[] = [];
   try {
     const res = await fetchWithTimeout(baseUrl, {}, 5000);
     if (res.ok) {
