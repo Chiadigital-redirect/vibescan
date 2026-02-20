@@ -546,6 +546,7 @@ function ScanPageInner() {
   const [report, setReport] = useState<ScanReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [activeTab, setActiveTab] = useState<'pages' | 'data' | 'risks'>('risks');
   const [modal, setModal] = useState<{
     isOpen: boolean;
     check: ScanCheck | null;
@@ -577,6 +578,12 @@ function ScanPageInner() {
 
       const data = await res.json();
       setReport(data);
+      // Auto-switch to Data tab if there are leaks, otherwise Risks
+      if (data.dataLeaks?.openTables > 0 || data.checks?.some((c: ScanCheck) => c.id.startsWith('secret-') && c.status === 'critical')) {
+        setActiveTab('data');
+      } else {
+        setActiveTab('risks');
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
     } finally {
@@ -709,16 +716,16 @@ function ScanPageInner() {
         </div>
       </nav>
 
-      <main className="max-w-5xl mx-auto px-4 sm:px-6 py-10 space-y-10">
+      <main className="max-w-5xl mx-auto px-4 sm:px-6 py-6 space-y-6">
 
-        {/* ── SECTION 1: Score card ── */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-10">
-          <p className="text-xs text-slate-400 font-semibold uppercase tracking-widest mb-2">Security Report</p>
-          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 mb-1 break-all font-mono">{report.url}</h1>
-          <p className="text-slate-400 text-sm mb-8">
+        {/* ── Score card ── */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8">
+          <p className="text-xs text-slate-400 font-semibold uppercase tracking-widest mb-1">Security Report</p>
+          <h1 className="text-lg sm:text-xl font-bold text-slate-900 mb-0.5 break-all font-mono">{report.url}</h1>
+          <p className="text-slate-400 text-xs mb-6">
             Scanned {new Date(report.scannedAt).toLocaleString()} · Passive scan only
           </p>
-          <div className="flex flex-col items-center mb-4">
+          <div className="flex flex-col items-center mb-2">
             <ScoreBadge score={report.score} />
             <SummaryBar
               critical={report.summary.critical}
@@ -728,115 +735,156 @@ function ScanPageInner() {
           </div>
         </div>
 
-        {/* ── SECTION 2: Pages found (always visible) ── */}
-        <section>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-xl">🗺️</span>
-            <h2 className="text-lg font-bold text-slate-900">
-              Pages found on your app
-            </h2>
-            {report.discoveredUrls.length > 0 && (
-              <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded-full">
+        {/* ── Tab bar ── */}
+        <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+          <div className="flex border-b border-slate-100">
+            {/* Pages tab */}
+            <button
+              onClick={() => setActiveTab('pages')}
+              className={`flex-1 flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 px-3 py-4 text-sm font-semibold transition-colors border-b-2 ${
+                activeTab === 'pages'
+                  ? 'border-blue-500 text-blue-700 bg-blue-50'
+                  : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              <span className="text-xl">🗺️</span>
+              <span>Pages</span>
+              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                activeTab === 'pages' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'
+              }`}>
                 {report.discoveredUrls.length}
               </span>
-            )}
-          </div>
-          <p className="text-slate-500 text-sm ml-8 mb-3">
-            Every URL we could find — via sitemap, robots.txt, and your JavaScript bundles.
-            Check that each one should be publicly reachable.
-          </p>
-          <DiscoveredUrlsSection urls={report.discoveredUrls} />
-        </section>
+            </button>
 
-        {/* ── SECTION 3: Data leaking (always visible) ── */}
-        <section>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-xl">🔓</span>
-            <h2 className="text-lg font-bold text-slate-900">Data leaking from your app</h2>
-            {exposedItems.length > 0 && (
-              <span className="bg-red-100 text-red-700 text-xs font-bold px-2 py-0.5 rounded-full">
-                {exposedItems.length} {exposedItems.length === 1 ? 'leak' : 'leaks'}
+            {/* Data tab */}
+            <button
+              onClick={() => setActiveTab('data')}
+              className={`flex-1 flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 px-3 py-4 text-sm font-semibold transition-colors border-b-2 ${
+                activeTab === 'data'
+                  ? 'border-red-500 text-red-700 bg-red-50'
+                  : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              <span className="text-xl">🔓</span>
+              <span>Data Leaks</span>
+              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                exposedItems.length > 0
+                  ? activeTab === 'data' ? 'bg-red-100 text-red-700' : 'bg-red-100 text-red-600'
+                  : activeTab === 'data' ? 'bg-green-100 text-green-700' : 'bg-green-100 text-green-600'
+              }`}>
+                {exposedItems.length > 0 ? `${exposedItems.length} found` : '✓ Clean'}
               </span>
-            )}
+            </button>
+
+            {/* Risks tab */}
+            <button
+              onClick={() => setActiveTab('risks')}
+              className={`flex-1 flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 px-3 py-4 text-sm font-semibold transition-colors border-b-2 ${
+                activeTab === 'risks'
+                  ? 'border-orange-500 text-orange-700 bg-orange-50'
+                  : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              <span className="text-xl">🛡️</span>
+              <span>Risks</span>
+              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                report.summary.critical > 0
+                  ? activeTab === 'risks' ? 'bg-red-100 text-red-700' : 'bg-red-100 text-red-600'
+                  : activeTab === 'risks' ? 'bg-amber-100 text-amber-700' : 'bg-amber-100 text-amber-600'
+              }`}>
+                {report.summary.critical > 0 ? `${report.summary.critical} critical` : `${report.summary.warnings} warnings`}
+              </span>
+            </button>
           </div>
-          <p className="text-slate-500 text-sm ml-8 mb-3">
-            Credentials, secrets, and live database rows that are publicly visible right now.
-          </p>
 
-          {exposedItems.length === 0 ? (
-            <div className="bg-green-50 border border-green-200 rounded-xl p-6 flex items-center gap-4">
-              <span className="text-3xl">✅</span>
-              <div>
-                <p className="font-bold text-green-800">No data leaks detected</p>
-                <p className="text-green-700 text-sm mt-0.5">
-                  We couldn&apos;t find any exposed credentials, secrets, or open database tables.
-                </p>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {exposedItems.map((item, i) => (
-                <ExposedDataCard key={i} item={item} />
-              ))}
-            </div>
-          )}
-        </section>
-
-        {/* ── SECTION 4: Security risks ── */}
-        <section>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-xl">🛡️</span>
-            <h2 className="text-lg font-bold text-slate-900">Security risks</h2>
-          </div>
-          <p className="text-slate-500 text-sm ml-8 mb-4">
-            Headers, HTTPS, CORS, and other security configuration issues.
-          </p>
-
-          {criticalChecks.length > 0 && (
-            <div className="mb-6">
-              <div className="flex items-center gap-2 mb-3">
-                <span className="text-base">🔴</span>
-                <h3 className="font-bold text-slate-800">Urgent — fix these today</h3>
-                <span className="bg-red-100 text-red-700 text-xs font-bold px-2 py-0.5 rounded-full">{criticalChecks.length}</span>
-              </div>
-              <div className="space-y-3">
-                {criticalChecks.map(check => (
-                  <CheckCard key={check.id} check={check} onFixClick={handleFixClick} />
-                ))}
-              </div>
+          {/* ── Tab: Pages ── */}
+          {activeTab === 'pages' && (
+            <div className="p-4 sm:p-6">
+              <p className="text-slate-500 text-sm mb-4">
+                Every URL found via sitemap, robots.txt, and JavaScript bundle route extraction.
+                Check that each one should be publicly reachable.
+              </p>
+              <DiscoveredUrlsSection urls={report.discoveredUrls} />
             </div>
           )}
 
-          {warningChecks.length > 0 && (
-            <div className="mb-6">
-              <div className="flex items-center gap-2 mb-3">
-                <span className="text-base">🟡</span>
-                <h3 className="font-bold text-slate-800">Worth fixing soon</h3>
-                <span className="bg-amber-100 text-amber-700 text-xs font-bold px-2 py-0.5 rounded-full">{warningChecks.length}</span>
-              </div>
-              <div className="space-y-3">
-                {warningChecks.map(check => (
-                  <CheckCard key={check.id} check={check} onFixClick={handleFixClick} />
-                ))}
-              </div>
+          {/* ── Tab: Data Leaks ── */}
+          {activeTab === 'data' && (
+            <div className="p-4 sm:p-6">
+              <p className="text-slate-500 text-sm mb-4">
+                Credentials, secrets, and live database rows visible to anyone right now.
+              </p>
+              {exposedItems.length === 0 ? (
+                <div className="bg-green-50 border border-green-200 rounded-xl p-6 flex items-center gap-4">
+                  <span className="text-3xl">✅</span>
+                  <div>
+                    <p className="font-bold text-green-800">No data leaks detected</p>
+                    <p className="text-green-700 text-sm mt-0.5">
+                      No exposed credentials, secrets, or open database tables found.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {exposedItems.map((item, i) => (
+                    <ExposedDataCard key={i} item={item} />
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
-          {passChecks.length > 0 && (
-            <div>
-              <div className="flex items-center gap-2 mb-3">
-                <span className="text-base">🟢</span>
-                <h3 className="font-bold text-slate-800">Checks you passed</h3>
-                <span className="bg-green-100 text-green-700 text-xs font-bold px-2 py-0.5 rounded-full">{passChecks.length}</span>
-              </div>
-              <div className="space-y-3">
-                {passChecks.map(check => (
-                  <CheckCard key={check.id} check={check} onFixClick={handleFixClick} />
-                ))}
-              </div>
+          {/* ── Tab: Risks ── */}
+          {activeTab === 'risks' && (
+            <div className="p-4 sm:p-6 space-y-6">
+              {criticalChecks.length === 0 && warningChecks.length === 0 && passChecks.length === 0 && (
+                <p className="text-slate-500 text-sm">No security checks available.</p>
+              )}
+              {criticalChecks.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="text-base">🔴</span>
+                    <h3 className="font-bold text-slate-800">Urgent — fix these today</h3>
+                    <span className="bg-red-100 text-red-700 text-xs font-bold px-2 py-0.5 rounded-full">{criticalChecks.length}</span>
+                  </div>
+                  <div className="space-y-3">
+                    {criticalChecks.map(check => (
+                      <CheckCard key={check.id} check={check} onFixClick={handleFixClick} />
+                    ))}
+                  </div>
+                </div>
+              )}
+              {warningChecks.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="text-base">🟡</span>
+                    <h3 className="font-bold text-slate-800">Worth fixing soon</h3>
+                    <span className="bg-amber-100 text-amber-700 text-xs font-bold px-2 py-0.5 rounded-full">{warningChecks.length}</span>
+                  </div>
+                  <div className="space-y-3">
+                    {warningChecks.map(check => (
+                      <CheckCard key={check.id} check={check} onFixClick={handleFixClick} />
+                    ))}
+                  </div>
+                </div>
+              )}
+              {passChecks.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="text-base">🟢</span>
+                    <h3 className="font-bold text-slate-800">Checks you passed</h3>
+                    <span className="bg-green-100 text-green-700 text-xs font-bold px-2 py-0.5 rounded-full">{passChecks.length}</span>
+                  </div>
+                  <div className="space-y-3">
+                    {passChecks.map(check => (
+                      <CheckCard key={check.id} check={check} onFixClick={handleFixClick} />
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
-        </section>
+        </div>
 
         {/* CTA */}
         <section className="bg-orange-50 border border-orange-100 rounded-2xl p-8 text-center">

@@ -27,7 +27,7 @@ const SECRET_PATTERNS: { name: string; pattern: RegExp; severity: 'critical' | '
   { name: 'Stripe Test Key', pattern: /pk_test_[a-zA-Z0-9]+|sk_test_[a-zA-Z0-9]+/g, severity: 'warning' },
   { name: 'Google API Key', pattern: /AIza[0-9A-Za-z\-_]{35}/g, severity: 'critical' },
   { name: 'NEXT_PUBLIC Secret', pattern: /NEXT_PUBLIC_[A-Z_]*(SECRET|KEY|TOKEN)[A-Z_]*/g, severity: 'warning' },
-  { name: 'Supabase JWT', pattern: /eyJhbGciOiJIUzI1NiJ[a-zA-Z0-9+/=._-]*/g, severity: 'critical' },
+  { name: 'Supabase JWT', pattern: /eyJ[a-zA-Z0-9+/=._-]{100,}/g, severity: 'critical' },
 ];
 
 // Supabase URL pattern for extraction
