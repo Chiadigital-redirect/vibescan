@@ -347,7 +347,7 @@ function ExposedDataCard({ item }: { item: ExposedDataItem }) {
                     </div>
                   )}
                   <div className="px-4 py-2.5 bg-white border-t border-slate-100 text-xs text-slate-500 flex items-center justify-between">
-                    <span className="font-mono text-slate-400">{item.dataLeaks.supabaseUrl}/rest/v1/{table.name}</span>
+                    <span className="font-mono text-slate-400">{item.dataLeaks?.supabaseUrl}/rest/v1/{table.name}</span>
                     <a href="https://supabase.com/docs/guides/auth/row-level-security" target="_blank" rel="noopener noreferrer"
                       className="text-orange-600 font-semibold hover:text-orange-700 whitespace-nowrap ml-4">
                       Fix with RLS →
