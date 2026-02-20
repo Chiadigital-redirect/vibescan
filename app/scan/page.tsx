@@ -42,16 +42,42 @@ function ScoreBadge({ score }: { score: number }) {
   const isMid = score >= 40 && score < 70;
 
   const config = isGood
-    ? { bg: 'bg-green-50', border: 'border-green-200', text: 'text-green-700', label: "You're in good shape", sublabel: 'A few things to review' }
+    ? { bg: 'bg-green-50', border: 'border-green-300', text: 'text-green-700', ring: 'ring-green-200', label: "You're in good shape", sublabel: 'A few things to review' }
     : isMid
-    ? { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', label: 'Room for improvement', sublabel: 'Some issues need attention' }
-    : { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', label: 'Needs urgent attention', sublabel: 'Critical issues found' };
+    ? { bg: 'bg-amber-50', border: 'border-amber-300', text: 'text-amber-700', ring: 'ring-amber-200', label: 'Room for improvement', sublabel: 'Some issues need attention' }
+    : { bg: 'bg-red-50', border: 'border-red-300', text: 'text-red-700', ring: 'ring-red-200', label: 'Needs urgent attention', sublabel: 'Critical issues found' };
 
   return (
-    <div className={`${config.bg} ${config.border} border-2 rounded-2xl p-8 text-center`}>
-      <div className={`text-7xl font-bold ${config.text} mb-2`}>{score}</div>
-      <div className={`text-lg font-semibold ${config.text} mb-1`}>{config.label}</div>
-      <div className="text-slate-500 text-sm">{config.sublabel}</div>
+    <div className="flex flex-col items-center">
+      <div className={`${config.bg} ${config.border} border-2 rounded-2xl px-10 py-8 text-center ring-4 ${config.ring} ring-offset-2`}>
+        <div className={`text-8xl font-black ${config.text} mb-2 leading-none`}>{score}</div>
+        <div className={`text-base font-bold ${config.text} mb-1`}>{config.label}</div>
+        <div className="text-slate-500 text-sm">{config.sublabel}</div>
+      </div>
+    </div>
+  );
+}
+
+function SummaryBar({ critical, warnings, passed }: { critical: number; warnings: number; passed: number }) {
+  return (
+    <div className="flex flex-wrap items-center justify-center gap-3 mt-5">
+      <span className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-sm font-bold ${
+        critical > 0 ? 'bg-red-100 text-red-700 border border-red-200' : 'bg-slate-100 text-slate-400 border border-slate-200'
+      }`}>
+        🔴 {critical} critical
+      </span>
+      <span className="text-slate-300 text-lg select-none">·</span>
+      <span className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-sm font-bold ${
+        warnings > 0 ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-slate-100 text-slate-400 border border-slate-200'
+      }`}>
+        🟡 {warnings} warnings
+      </span>
+      <span className="text-slate-300 text-lg select-none">·</span>
+      <span className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-sm font-bold ${
+        passed > 0 ? 'bg-green-100 text-green-700 border border-green-200' : 'bg-slate-100 text-slate-400 border border-slate-200'
+      }`}>
+        🟢 {passed} passed
+      </span>
     </div>
   );
 }
@@ -67,7 +93,6 @@ function CheckCard({
 
   // Get human-friendly copy
   const copyKey = (() => {
-    // Map check IDs to copy keys
     if (check.id === 'ssl') return check.status === 'pass' ? 'ssl-pass' : 'ssl-critical';
     if (check.id.startsWith('header-')) {
       const hKey = check.id.replace('header-', 'header-');
@@ -101,41 +126,29 @@ function CheckCard({
   const plainEnglish = copy?.plainEnglish || check.detail;
   const hasFixPrompt = !!(copy?.fixPrompt);
 
-  const categoryLabel: Record<string, string> = {
-    pages: 'Page Discovery',
-    headers: 'Security Headers',
-    secrets: 'Exposed Secrets',
-    exposure: 'File Exposure',
-    ssl: 'SSL / HTTPS',
-  };
-
   return (
     <div className={`border rounded-xl p-5 ${sv.bg} ${sv.border}`}>
       <div className="flex items-start gap-4">
-        <div className="flex-shrink-0 mt-0.5">
+        <div className="flex-shrink-0 mt-1">
           <span className="text-2xl">{sv.emoji}</span>
         </div>
         <div className="flex-1 min-w-0">
-          {/* Category + technical name */}
-          <div className="flex items-center gap-2 mb-1 flex-wrap">
-            <span className="text-xs font-medium text-slate-400 uppercase tracking-wide">
-              {categoryLabel[check.category] || check.category}
-            </span>
-            <span className="text-slate-200">·</span>
+          {/* Technical name — small, secondary */}
+          <div className="mb-2">
             <span className="text-xs text-slate-400 font-mono">{check.name}</span>
           </div>
 
-          {/* Plain-English headline */}
-          <h3 className={`font-semibold text-slate-900 text-base mb-2 leading-snug`}>
+          {/* Plain-English headline — BIG and bold */}
+          <h3 className="font-extrabold text-slate-900 text-lg sm:text-xl mb-3 leading-snug">
             {headline}
           </h3>
 
-          {/* 5-year-old explanation */}
-          <p className="text-slate-600 text-sm leading-relaxed mb-3">{plainEnglish}</p>
+          {/* 5-year-old explanation — softer color */}
+          <p className="text-slate-500 text-sm leading-relaxed mb-4">{plainEnglish}</p>
 
           {/* Value found */}
           {check.value && check.status !== 'pass' && check.status !== 'info' && (
-            <div className="mb-3">
+            <div className="mb-4">
               <span className="text-xs text-slate-400 mr-2">Found:</span>
               <span className="url-path">{check.value}</span>
             </div>
@@ -143,15 +156,15 @@ function CheckCard({
 
           {/* Severity label + fix button */}
           <div className="flex items-center gap-3 flex-wrap">
-            <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${sv.color} ${sv.bg} ${sv.border}`}>
+            <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${sv.color} ${sv.bg} ${sv.border}`}>
               {sv.label}
             </span>
             {hasFixPrompt && (
               <button
                 onClick={() => copy && onFixClick(check, copy)}
-                className="text-xs font-semibold text-orange-600 hover:text-orange-700 border border-orange-200 hover:border-orange-300 bg-white hover:bg-orange-50 px-3 py-1 rounded-full transition-colors flex items-center gap-1.5"
+                className="text-sm font-bold text-white bg-orange-500 hover:bg-orange-600 active:bg-orange-700 px-4 py-1.5 rounded-full transition-colors flex items-center gap-2 shadow-sm"
               >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                   <path d="M12 20h9"/>
                   <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
                 </svg>
@@ -193,13 +206,13 @@ function DiscoveredUrlsSection({ urls }: { urls: string[] }) {
         return (
           <div key={i} className={`flex items-center gap-3 px-4 py-3 border rounded-lg ${rowBg}`}>
             <span className="text-base flex-shrink-0">{classified.emoji}</span>
-            <span className="url-path text-slate-700 flex-shrink-0 max-w-xs truncate">{path}</span>
-            <span className="text-slate-400 text-sm flex-1 min-w-0">{classified.label}</span>
+            <span className="url-path text-slate-700 flex-shrink-0 max-w-[180px] sm:max-w-xs truncate">{path}</span>
+            <span className="text-slate-400 text-sm flex-1 min-w-0 truncate">{classified.label}</span>
             <a
               href={url}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-slate-300 hover:text-slate-500 transition-colors flex-shrink-0"
+              className="text-slate-300 hover:text-slate-500 transition-colors flex-shrink-0 p-1"
               aria-label={`Open ${url}`}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -214,7 +227,7 @@ function DiscoveredUrlsSection({ urls }: { urls: string[] }) {
       {urls.length > 10 && (
         <button
           onClick={() => setShowAll(v => !v)}
-          className="w-full py-2 text-sm text-slate-500 hover:text-slate-700 border border-dashed border-slate-200 rounded-lg transition-colors"
+          className="w-full py-3 text-sm text-slate-500 hover:text-slate-700 border border-dashed border-slate-200 rounded-lg transition-colors"
         >
           {showAll ? 'Show less ↑' : `Show all ${urls.length} pages ↓`}
         </button>
@@ -292,7 +305,7 @@ function LoadingTerminal({ targetUrl }: { targetUrl: string }) {
         </div>
 
         <p className="text-center text-xs text-slate-400 mt-4">
-          This takes about 15 seconds. We&apos;re making standard HTTP requests only — your app is safe.
+          This takes about 15–30 seconds. We&apos;re making standard HTTP requests only — your app is safe.
         </p>
       </div>
     </div>
@@ -435,37 +448,23 @@ function ScanPageInner() {
         </div>
       </nav>
 
-      <main className="max-w-5xl mx-auto px-6 py-10 space-y-10">
+      <main className="max-w-5xl mx-auto px-4 sm:px-6 py-10 space-y-10">
         {/* Header */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8">
-          <p className="text-xs text-slate-400 font-medium uppercase tracking-wide mb-1">Security Report</p>
-          <h1 className="text-2xl font-bold text-slate-900 mb-1 break-all font-mono">{report.url}</h1>
-          <p className="text-slate-400 text-sm mb-6">
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-10">
+          <p className="text-xs text-slate-400 font-semibold uppercase tracking-widest mb-2">Security Report</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 mb-1 break-all font-mono">{report.url}</h1>
+          <p className="text-slate-400 text-sm mb-8">
             Scanned {new Date(report.scannedAt).toLocaleString()} · Passive scan only
           </p>
 
-          {/* Score + Summary grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-            <div className="sm:col-span-1">
-              <ScoreBadge score={report.score} />
-            </div>
-            <div className="sm:col-span-3 grid grid-cols-3 gap-4">
-              <div className="bg-red-50 border border-red-100 rounded-xl p-4 text-center">
-                <div className="text-4xl font-bold text-red-600 mb-1">{report.summary.critical}</div>
-                <div className="text-sm font-medium text-red-700">🔴 Urgent</div>
-                <div className="text-xs text-red-500 mt-0.5">Fix today</div>
-              </div>
-              <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 text-center">
-                <div className="text-4xl font-bold text-amber-600 mb-1">{report.summary.warnings}</div>
-                <div className="text-sm font-medium text-amber-700">🟡 Warnings</div>
-                <div className="text-xs text-amber-500 mt-0.5">Fix soon</div>
-              </div>
-              <div className="bg-green-50 border border-green-100 rounded-xl p-4 text-center">
-                <div className="text-4xl font-bold text-green-600 mb-1">{report.summary.passed}</div>
-                <div className="text-sm font-medium text-green-700">🟢 Passed</div>
-                <div className="text-xs text-green-500 mt-0.5">Good shape</div>
-              </div>
-            </div>
+          {/* Score — large, centered */}
+          <div className="flex flex-col items-center mb-4">
+            <ScoreBadge score={report.score} />
+            <SummaryBar
+              critical={report.summary.critical}
+              warnings={report.summary.warnings}
+              passed={report.summary.passed}
+            />
           </div>
         </div>
 
@@ -503,16 +502,19 @@ function ScanPageInner() {
 
         {/* Discovered URLs */}
         <section>
-          <div className="flex items-center gap-2 mb-2">
-            <span className="text-xl">🗺️</span>
-            <h2 className="text-lg font-bold text-slate-900">
-              {report.discoveredUrls.length} pages discovered
-            </h2>
+          <div className="mb-3">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-xl">🗺️</span>
+              <h2 className="text-lg font-bold text-slate-900">
+                {report.discoveredUrls.length === 1
+                  ? '1 page found on your app'
+                  : `${report.discoveredUrls.length} pages found on your app`}
+              </h2>
+            </div>
+            <p className="text-slate-500 text-sm ml-8">
+              Some of these might surprise you — check that each one should be publicly accessible.
+            </p>
           </div>
-          <p className="text-slate-500 text-sm mb-4">
-            These are all the URLs we found by reading your sitemap, robots.txt, and homepage links.
-            Some of these might surprise you — especially the ones flagged below.
-          </p>
           <div className="bg-white border border-slate-200 rounded-xl p-4">
             <DiscoveredUrlsSection urls={report.discoveredUrls} />
           </div>
