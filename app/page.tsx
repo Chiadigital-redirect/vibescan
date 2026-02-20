@@ -1,12 +1,19 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { getScanHistory, removeScanFromHistory, ScanHistoryEntry } from '@/lib/scan-history';
 
 export default function HomePage() {
   const [url, setUrl] = useState('');
   const [error, setError] = useState('');
+  const [history, setHistory] = useState<ScanHistoryEntry[]>([]);
   const router = useRouter();
+
+  // Load scan history from localStorage on mount (client-side only)
+  useEffect(() => {
+    setHistory(getScanHistory());
+  }, []);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -29,6 +36,11 @@ export default function HomePage() {
 
     const encoded = encodeURIComponent(normalized);
     router.push(`/scan?url=${encoded}`);
+  }
+
+  function handleRemove(domain: string) {
+    removeScanFromHistory(domain);
+    setHistory(getScanHistory());
   }
 
   return (
@@ -269,6 +281,93 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+
+      {/* Recent Scans — only shown if the user has local history */}
+      {history.length > 0 && (
+        <section className="px-6 py-12 bg-white border-b border-slate-100">
+          <div className="max-w-5xl mx-auto">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h2 className="text-xl font-bold text-slate-900">Recent Scans</h2>
+                <p className="text-slate-500 text-sm mt-0.5">Stored locally in your browser</p>
+              </div>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {history.slice(0, 6).map((entry) => {
+                const scoreColor =
+                  entry.score >= 70
+                    ? 'text-green-700 bg-green-50 border-green-200'
+                    : entry.score >= 40
+                    ? 'text-amber-700 bg-amber-50 border-amber-200'
+                    : 'text-red-700 bg-red-50 border-red-200';
+                const ago = (() => {
+                  const ms = Date.now() - new Date(entry.scannedAt).getTime();
+                  const mins = Math.floor(ms / 60000);
+                  if (mins < 60) return `${mins}m ago`;
+                  const hrs = Math.floor(mins / 60);
+                  if (hrs < 24) return `${hrs}h ago`;
+                  return `${Math.floor(hrs / 24)}d ago`;
+                })();
+                return (
+                  <div
+                    key={entry.domain}
+                    className="group relative flex items-center gap-4 p-4 border border-slate-200 rounded-xl hover:border-orange-300 hover:shadow-sm transition-all bg-white"
+                  >
+                    {/* Remove button */}
+                    <button
+                      onClick={(e) => { e.preventDefault(); handleRemove(entry.domain); }}
+                      className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity text-slate-300 hover:text-slate-500 p-0.5"
+                      title="Remove from history"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                      </svg>
+                    </button>
+
+                    {/* Score badge */}
+                    <div className={`flex-shrink-0 w-12 h-12 rounded-xl border-2 flex items-center justify-center font-black text-xl ${scoreColor}`}>
+                      {entry.score}
+                    </div>
+
+                    {/* Info */}
+                    <div className="flex-1 min-w-0">
+                      <a
+                        href={`/scan?url=${encodeURIComponent(entry.url)}`}
+                        className="block font-semibold text-slate-800 text-sm truncate hover:text-orange-600 transition-colors"
+                      >
+                        {entry.domain}
+                      </a>
+                      <div className="flex items-center gap-2 mt-0.5 text-xs text-slate-400">
+                        <span>{ago}</span>
+                        {entry.critical > 0 && (
+                          <span className="text-red-500 font-medium">· {entry.critical} critical</span>
+                        )}
+                        {entry.critical === 0 && entry.warnings > 0 && (
+                          <span className="text-amber-500">· {entry.warnings} warnings</span>
+                        )}
+                        {entry.critical === 0 && entry.warnings === 0 && (
+                          <span className="text-green-600">· Clean ✓</span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Re-scan arrow */}
+                    <a
+                      href={`/scan?url=${encodeURIComponent(entry.url)}`}
+                      className="flex-shrink-0 text-slate-300 group-hover:text-orange-400 transition-colors"
+                      title="Re-scan"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="m9 18 6-6-6-6"/>
+                      </svg>
+                    </a>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* CTA */}
       <section className="bg-orange-50 border-y border-orange-100 px-6 py-20">
