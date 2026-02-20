@@ -199,7 +199,7 @@ function CheckCard({
 
 function DiscoveredUrlsSection({ urls }: { urls: string[] }) {
   const [showAll, setShowAll] = useState(false);
-  const display = showAll ? urls : urls.slice(0, 10);
+  const display = showAll ? urls : urls.slice(0, 15);
 
   if (urls.length === 0) {
     return (
@@ -209,46 +209,101 @@ function DiscoveredUrlsSection({ urls }: { urls: string[] }) {
     );
   }
 
+  // Derive origin from first URL for display
+  let origin = '';
+  try { origin = new URL(urls[0]).origin; } catch {}
+
+  // Sort: warnings/critical first, then alpha
+  const sorted = [...urls].sort((a, b) => {
+    const ca = classifyUrl(a);
+    const cb = classifyUrl(b);
+    const order = { critical: 0, warning: 1, info: 2 };
+    return order[ca.severity] - order[cb.severity];
+  });
+
+  const toShow = showAll ? sorted : sorted.slice(0, 15);
+
   return (
-    <div className="space-y-2">
-      {display.map((url, i) => {
-        const classified = classifyUrl(url);
-        let path = url;
-        try { path = new URL(url).pathname || url; } catch {}
+    <div>
+      {/* Header with origin */}
+      {origin && (
+        <div className="px-4 py-2.5 bg-slate-50 border border-slate-200 border-b-0 rounded-t-xl flex items-center gap-2 text-xs text-slate-500">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/>
+            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+          </svg>
+          <span className="font-mono font-medium text-slate-700">{origin}</span>
+          <span className="ml-auto">{urls.length} pages indexed</span>
+        </div>
+      )}
 
-        const rowBg = classified.severity === 'critical'
-          ? 'bg-red-50 border-red-100'
-          : classified.severity === 'warning'
-          ? 'bg-amber-50 border-amber-100'
-          : 'bg-white border-slate-100';
+      {/* URL rows */}
+      <div className={`border border-slate-200 ${origin ? 'rounded-b-xl' : 'rounded-xl'} overflow-hidden divide-y divide-slate-100`}>
+        {toShow.map((url, i) => {
+          const classified = classifyUrl(url);
+          let path = '/';
+          try { path = new URL(url).pathname || '/'; } catch {}
 
-        return (
-          <div key={i} className={`flex items-center gap-3 px-4 py-3 border rounded-lg ${rowBg}`}>
-            <span className="text-base flex-shrink-0">{classified.emoji}</span>
-            <span className="url-path text-slate-700 flex-shrink-0 max-w-[180px] sm:max-w-xs truncate">{path}</span>
-            <span className="text-slate-400 text-sm flex-1 min-w-0 truncate">{classified.label}</span>
-            <a
-              href={url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-slate-300 hover:text-slate-500 transition-colors flex-shrink-0 p-1"
-              aria-label={`Open ${url}`}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-                <polyline points="15,3 21,3 21,9"/>
-                <line x1="10" y1="14" x2="21" y2="3"/>
-              </svg>
-            </a>
-          </div>
-        );
-      })}
-      {urls.length > 10 && (
+          // Indent sub-paths visually
+          const depth = (path.match(/\//g) || []).length - 1;
+          const paddingLeft = Math.min(depth, 3) * 16;
+
+          const rowBg = classified.severity === 'critical'
+            ? 'bg-red-50'
+            : classified.severity === 'warning'
+            ? 'bg-amber-50'
+            : i % 2 === 0 ? 'bg-white' : 'bg-slate-50/50';
+
+          return (
+            <div key={i} className={`flex items-center gap-3 px-4 py-2.5 ${rowBg} hover:bg-slate-100 transition-colors group`}
+              style={{ paddingLeft: `${16 + paddingLeft}px` }}>
+              <span className="text-sm flex-shrink-0 w-5 text-center">{classified.emoji}</span>
+
+              {/* Path — monospace, tree-style */}
+              <div className="flex-1 min-w-0 flex items-baseline gap-2">
+                <span className="font-mono text-sm text-slate-800 truncate max-w-[200px] sm:max-w-sm">
+                  {path === '/' ? '/' : path}
+                </span>
+                <span className="text-xs text-slate-400 truncate hidden sm:block">{classified.label}</span>
+              </div>
+
+              {/* Full URL on hover — external link */}
+              <a
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-slate-300 hover:text-orange-500 transition-colors flex-shrink-0 opacity-0 group-hover:opacity-100 flex items-center gap-1"
+                title={url}
+              >
+                <span className="text-xs text-slate-400 font-mono hidden sm:block max-w-[180px] truncate">{url}</span>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                  <polyline points="15,3 21,3 21,9"/>
+                  <line x1="10" y1="14" x2="21" y2="3"/>
+                </svg>
+              </a>
+
+              {/* Severity badge for warnings/critical */}
+              {classified.severity !== 'info' && (
+                <span className={`text-xs font-bold px-2 py-0.5 rounded-full flex-shrink-0 ${
+                  classified.severity === 'critical'
+                    ? 'bg-red-100 text-red-700'
+                    : 'bg-amber-100 text-amber-700'
+                }`}>
+                  {classified.severity === 'critical' ? '⚠️ Review' : '👀 Check'}
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {urls.length > 15 && (
         <button
           onClick={() => setShowAll(v => !v)}
-          className="w-full py-3 text-sm text-slate-500 hover:text-slate-700 border border-dashed border-slate-200 rounded-lg transition-colors"
+          className="w-full py-3 text-sm text-slate-500 hover:text-slate-700 border border-t-0 border-slate-200 rounded-b-xl transition-colors bg-white"
         >
-          {showAll ? 'Show less ↑' : `Show all ${urls.length} pages ↓`}
+          {showAll ? '↑ Show fewer' : `↓ Show all ${urls.length} pages`}
         </button>
       )}
     </div>

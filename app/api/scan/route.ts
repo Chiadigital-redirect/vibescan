@@ -130,16 +130,75 @@ async function discoverUrls(baseUrl: string): Promise<string[]> {
   return Array.from(urls).sort().slice(0, 50);
 }
 
-async function checkSensitivePaths(baseUrl: string): Promise<{ path: string; status: number }[]> {
-  const exposed: { path: string; status: number }[] = [];
+// Content validators — confirm the response is actually the sensitive file, not an SPA catch-all
+const PATH_VALIDATORS: Record<string, (body: string, contentType: string) => boolean> = {
+  '/.git/config': (b) => b.includes('[core]') || b.includes('[remote') || b.includes('[branch'),
+  '/.env': (b, ct) => !ct.includes('text/html') && /^[A-Z_]+=.+/m.test(b),
+  '/.env.local': (b, ct) => !ct.includes('text/html') && /^[A-Z_]+=.+/m.test(b),
+  '/.env.production': (b, ct) => !ct.includes('text/html') && /^[A-Z_]+=.+/m.test(b),
+  '/package.json': (b) => { try { const j = JSON.parse(b); return !!j.name && !!j.dependencies; } catch { return false; } },
+  '/database.json': (b) => { try { JSON.parse(b); return b.length > 10; } catch { return false; } },
+  '/config.json': (b) => { try { JSON.parse(b); return b.length > 10; } catch { return false; } },
+  '/api/users': (b) => { try { const j = JSON.parse(b); return Array.isArray(j) || (typeof j === 'object' && (j.users || j.data || j.email)); } catch { return false; } },
+  '/api/admin': (b, ct) => !ct.includes('text/html'),
+  '/api/config': (b, ct) => !ct.includes('text/html'),
+  '/phpinfo.php': (b) => b.includes('PHP Version') || b.includes('phpinfo'),
+  '/wp-admin': (b) => b.includes('wp-login') || b.includes('WordPress') || b.includes('wp-admin'),
+};
+
+// Generic SPA catch-all detector — returns true if body looks like an SPA fallback
+function isSpaFallback(body: string, contentType: string): boolean {
+  if (!contentType.includes('text/html')) return false;
+  // Common SPA indicators in the HTML
+  return (
+    body.includes('id="root"') ||
+    body.includes('id="app"') ||
+    body.includes('__NEXT_DATA__') ||
+    body.includes('_next/static') ||
+    (body.includes('<script') && body.includes('bundle') && body.length < 10000)
+  );
+}
+
+async function checkSensitivePaths(baseUrl: string): Promise<{ path: string; status: number; preview?: string }[]> {
+  const exposed: { path: string; status: number; preview?: string }[] = [];
   const origin = getOrigin(baseUrl);
 
   const checks = SENSITIVE_PATHS.map(async (path) => {
     try {
-      const res = await fetchWithTimeout(`${origin}${path}`, { method: 'HEAD' }, 5000);
-      if (res.status === 200) {
-        exposed.push({ path, status: res.status });
+      // Use GET so we can inspect the body — HEAD alone is not reliable for SPAs
+      const res = await fetchWithTimeout(`${origin}${path}`, { method: 'GET' }, 5000);
+      if (res.status !== 200) return;
+
+      const contentType = res.headers.get('content-type') || '';
+      const body = await res.text();
+
+      // Reject SPA catch-all responses
+      if (isSpaFallback(body, contentType)) return;
+
+      // Run path-specific validator if we have one
+      const validator = PATH_VALIDATORS[path];
+      if (validator && !validator(body, contentType)) return;
+
+      // If no specific validator, use generic non-HTML check for API/data paths
+      if (!validator && contentType.includes('text/html')) return;
+
+      // Extract a safe preview snippet (no secrets, just enough to confirm it's real)
+      let preview: string | undefined;
+      if (path.includes('.env')) {
+        // Show key names only, not values
+        const keyNames = (body.match(/^([A-Z_]+)=/gm) || []).slice(0, 5).join(', ');
+        if (keyNames) preview = `Contains: ${keyNames}...`;
+      } else if (path === '/package.json') {
+        try {
+          const pkg = JSON.parse(body);
+          preview = `${pkg.name}@${pkg.version} — ${Object.keys(pkg.dependencies || {}).length} dependencies`;
+        } catch {}
+      } else if (path.includes('.git')) {
+        const firstLine = body.split('\n').find(l => l.trim()) || '';
+        preview = firstLine.trim();
       }
+
+      exposed.push({ path, status: res.status, preview });
     } catch {}
   });
 
@@ -480,7 +539,7 @@ async function runScan(baseUrl: string) {
       detail: 'No sensitive files or paths found publicly accessible.',
     });
   } else {
-    for (const { path } of exposed) {
+    for (const { path, preview } of exposed) {
       const isWordPress = path === '/wp-admin';
       const isCritical = ['/.env', '/.env.local', '/.env.production', '/.git/config', '/database.json'].includes(path);
       checks.push({
@@ -489,7 +548,7 @@ async function runScan(baseUrl: string) {
         name: isWordPress ? 'WordPress Detected' : `Exposed: ${path}`,
         status: isCritical ? 'critical' : 'warning',
         detail: isCritical
-          ? `⚠️ ${path} is publicly accessible! This file may contain secrets, API keys, or database credentials.`
+          ? `⚠️ ${path} is publicly accessible! This file may contain secrets, API keys, or database credentials.${preview ? ` Preview: ${preview}` : ''}`
           : `${path} returned HTTP 200. Review whether this should be publicly accessible.`,
         value: path,
       });
