@@ -252,6 +252,14 @@ export const checkCopy: Record<string, CheckCopy> = {
     fixPromptWarning: 'After making this change, any frontend code that directly used this variable will break. Make sure you move the usage to a server-side API route first.',
   },
 
+  // Supabase data exposure
+  'supabase-data-exposure': {
+    headline: 'Anyone can read your database right now',
+    plainEnglish: "We used your public Supabase key — the one that's visible in your JavaScript — to query your live database. Real rows came back. No login required. Row Level Security (RLS) is the Supabase feature that's supposed to stop this, but it's not turned on for these tables. Every user record, every email, every piece of data in these tables is readable by anyone who finds your key.",
+    fixPrompt: `My Supabase database tables are publicly readable because Row Level Security (RLS) is not enabled. Enable RLS on the following tables and add a basic policy to only allow users to read their own data. For each table, show me the exact SQL to run in the Supabase SQL Editor: 1) ALTER TABLE {table_name} ENABLE ROW LEVEL SECURITY; 2) A SELECT policy that restricts anonymous reads. Only output the SQL commands — do not modify any application code files.`,
+    fixPromptWarning: 'Enabling RLS will immediately block all anonymous database access. Test your app thoroughly after applying — you may need to add additional policies to restore legitimate access for logged-in users.',
+  },
+
   // URL Discovery pass
   'url-discovery-pass': {
     headline: 'We mapped out all the pages we could find',

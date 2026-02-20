@@ -30,6 +30,25 @@ const SECRET_PATTERNS: { name: string; pattern: RegExp; severity: 'critical' | '
   { name: 'Supabase JWT', pattern: /eyJhbGciOiJIUzI1NiJ[a-zA-Z0-9+/=._-]*/g, severity: 'critical' },
 ];
 
+// Supabase URL pattern for extraction
+const SUPABASE_URL_PATTERN = /https:\/\/[a-z0-9-]+\.supabase\.co/g;
+
+export interface ExposedTable {
+  name: string;
+  columns: string[];
+  sampleRows: Record<string, unknown>[];
+  totalRows?: number;
+  rls: boolean; // whether RLS appears to be blocking data
+}
+
+export interface DataLeaks {
+  supabaseUrl: string;
+  keyPreview: string;
+  tables: ExposedTable[];
+  tablesFound: number;
+  openTables: number;
+}
+
 function normalizeUrl(url: string): string {
   if (!url.startsWith('http://') && !url.startsWith('https://')) {
     url = 'https://' + url;
@@ -148,8 +167,16 @@ async function checkSecurityHeaders(baseUrl: string): Promise<Record<string, str
   return headers;
 }
 
-async function detectApiKeys(baseUrl: string): Promise<{ type: string; preview: string; severity: 'critical' | 'warning' }[]> {
-  const findings: { type: string; preview: string; severity: 'critical' | 'warning' }[] = [];
+interface ApiKeyFinding {
+  type: string;
+  preview: string;
+  severity: 'critical' | 'warning';
+  supabaseUrl?: string;
+  supabaseKey?: string;
+}
+
+async function detectApiKeys(baseUrl: string): Promise<ApiKeyFinding[]> {
+  const findings: ApiKeyFinding[] = [];
   const origin = getOrigin(baseUrl);
 
   try {
@@ -180,15 +207,64 @@ async function detectApiKeys(baseUrl: string): Promise<{ type: string; preview: 
         if (!jsRes.ok) continue;
         const jsContent = await jsRes.text();
 
+        // Extract Supabase URL for data exposure check
+        let detectedSupabaseUrl: string | undefined;
+        let detectedSupabaseKey: string | undefined;
+        const urlMatches = jsContent.match(SUPABASE_URL_PATTERN);
+        if (urlMatches && urlMatches.length > 0) {
+          detectedSupabaseUrl = urlMatches[0];
+        }
+
         for (const { name, pattern, severity } of SECRET_PATTERNS) {
           pattern.lastIndex = 0;
           const match = jsContent.match(pattern);
           if (match) {
-            findings.push({
+            const finding: ApiKeyFinding = {
               type: name,
               preview: match[0].substring(0, 8) + '...',
               severity,
-            });
+            };
+
+            // If this is a Supabase JWT, attach the URL too for data exposure check
+            if (name === 'Supabase JWT' && detectedSupabaseUrl) {
+              // Grab the full key value (not just first 8 chars)
+              pattern.lastIndex = 0;
+              const fullMatch = jsContent.match(pattern);
+              if (fullMatch) {
+                finding.supabaseUrl = detectedSupabaseUrl;
+                finding.supabaseKey = fullMatch[0];
+                detectedSupabaseKey = fullMatch[0];
+              }
+            }
+
+            findings.push(finding);
+          }
+        }
+
+        // If we found a supabase URL but no JWT yet, look for the anon key pattern more broadly
+        if (detectedSupabaseUrl && !detectedSupabaseKey) {
+          // Look for any JWT-like string near the supabase URL
+          const anonKeyPattern = /eyJ[a-zA-Z0-9+/=._-]{100,}/g;
+          const anonMatches = jsContent.match(anonKeyPattern);
+          if (anonMatches) {
+            for (const key of anonMatches) {
+              // Filter to likely anon keys (they contain "anon" or "role" when base64 decoded)
+              try {
+                const parts = key.split('.');
+                if (parts.length >= 2) {
+                  const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
+                  if (payload.role === 'anon' || payload.iss === 'supabase') {
+                    // Already added as Supabase JWT finding, just enrich it
+                    const existing = findings.find(f => f.type === 'Supabase JWT');
+                    if (existing) {
+                      existing.supabaseUrl = detectedSupabaseUrl;
+                      existing.supabaseKey = key;
+                    }
+                    break;
+                  }
+                }
+              } catch {}
+            }
           }
         }
       } catch {}
@@ -218,6 +294,102 @@ async function checkCors(baseUrl: string): Promise<{ open: boolean; header: stri
   return { open: false, header: null };
 }
 
+// --- Supabase Data Exposure Check ---
+
+async function checkSupabaseDataExposure(supabaseUrl: string, anonKey: string): Promise<DataLeaks | null> {
+  const cleanUrl = supabaseUrl.replace(/\/$/, '');
+
+  // 1. Fetch OpenAPI spec to discover table names
+  let tableNames: string[] = [];
+  try {
+    const specRes = await fetchWithTimeout(`${cleanUrl}/rest/v1/`, {
+      headers: {
+        apikey: anonKey,
+        Authorization: `Bearer ${anonKey}`,
+        Accept: 'application/json',
+      },
+    }, 8000);
+
+    if (specRes.ok) {
+      const spec = await specRes.json() as {
+        definitions?: Record<string, unknown>;
+        paths?: Record<string, unknown>;
+      };
+      // Supabase returns Swagger spec with table names as definitions
+      if (spec.definitions) {
+        tableNames = Object.keys(spec.definitions).filter(name => {
+          // Filter out Supabase internal/view names
+          return !name.startsWith('_') && !name.includes('pg_') && !name.includes('information_schema');
+        }).slice(0, 8); // Check up to 8 tables
+      }
+    }
+  } catch {}
+
+  if (tableNames.length === 0) return null;
+
+  // 2. For each table, try to fetch sample rows
+  const tables: ExposedTable[] = [];
+
+  const tableChecks = tableNames.map(async (tableName) => {
+    try {
+      const res = await fetchWithTimeout(
+        `${cleanUrl}/rest/v1/${encodeURIComponent(tableName)}?limit=3`,
+        {
+          headers: {
+            apikey: anonKey,
+            Authorization: `Bearer ${anonKey}`,
+            Accept: 'application/json',
+            Prefer: 'count=exact',
+          },
+        },
+        6000
+      );
+
+      if (!res.ok) return;
+
+      const rows = await res.json() as Record<string, unknown>[];
+      const countHeader = res.headers.get('content-range');
+      let totalRows: number | undefined;
+      if (countHeader) {
+        const match = countHeader.match(/\/(\d+)$/);
+        if (match) totalRows = parseInt(match[1]);
+      }
+
+      if (Array.isArray(rows) && rows.length > 0) {
+        tables.push({
+          name: tableName,
+          columns: Object.keys(rows[0]),
+          sampleRows: rows,
+          totalRows,
+          rls: false, // Data returned = RLS not blocking
+        });
+      } else if (Array.isArray(rows) && rows.length === 0) {
+        // Empty table — still accessible, check if we can get schema
+        tables.push({
+          name: tableName,
+          columns: [],
+          sampleRows: [],
+          totalRows: 0,
+          rls: false,
+        });
+      }
+    } catch {}
+  });
+
+  await Promise.allSettled(tableChecks);
+
+  // Only include tables with actual data (non-empty)
+  const openTables = tables.filter(t => t.sampleRows.length > 0);
+
+  return {
+    supabaseUrl: cleanUrl,
+    keyPreview: anonKey.substring(0, 12) + '...',
+    tables: openTables.length > 0 ? openTables : tables.filter(t => t.columns.length === 0).slice(0, 3),
+    tablesFound: tableNames.length,
+    openTables: openTables.length,
+  };
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -236,7 +408,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid URL' }, { status: 400 });
     }
 
-    const TIMEOUT = 15000;
+    const TIMEOUT = 25000;
 
     // Run all checks with overall timeout
     const timeoutPromise = new Promise<never>((_, reject) =>
@@ -374,8 +546,10 @@ async function runScan(baseUrl: string) {
     });
   }
 
-  // API key detection
+  // API key detection + Supabase data exposure
   const keys = apiKeys.status === 'fulfilled' ? apiKeys.value : [];
+  let dataLeaks: DataLeaks | null = null;
+
   if (keys.length === 0) {
     checks.push({
       id: 'api-keys',
@@ -394,6 +568,25 @@ async function runScan(baseUrl: string) {
         detail: `A ${key.type} was found in public JavaScript. Rotate this key immediately.`,
         value: key.preview,
       });
+    }
+
+    // If we found Supabase credentials, check for live data exposure
+    const supabaseFinding = keys.find(k => k.supabaseUrl && k.supabaseKey);
+    if (supabaseFinding?.supabaseUrl && supabaseFinding?.supabaseKey) {
+      try {
+        dataLeaks = await checkSupabaseDataExposure(supabaseFinding.supabaseUrl, supabaseFinding.supabaseKey);
+
+        if (dataLeaks && dataLeaks.openTables > 0) {
+          checks.push({
+            id: 'supabase-data-exposure',
+            category: 'secrets',
+            name: 'Live Database Rows Exposed',
+            status: 'critical',
+            detail: `${dataLeaks.openTables} Supabase ${dataLeaks.openTables === 1 ? 'table' : 'tables'} are returning real data to anyone with your anon key. Row Level Security (RLS) is not protecting these tables.`,
+            value: `${dataLeaks.openTables} open tables`,
+          });
+        }
+      } catch {}
     }
   }
 
@@ -435,5 +628,6 @@ async function runScan(baseUrl: string) {
     },
     discoveredUrls: urls,
     checks,
+    dataLeaks,
   };
 }
