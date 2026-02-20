@@ -199,7 +199,6 @@ function CheckCard({
 
 function DiscoveredUrlsSection({ urls }: { urls: string[] }) {
   const [showAll, setShowAll] = useState(false);
-  const display = showAll ? urls : urls.slice(0, 15);
 
   if (urls.length === 0) {
     return (
