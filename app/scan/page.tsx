@@ -27,6 +27,7 @@ interface DataLeaks {
   supabaseUrl: string;
   keyPreview: string;
   tables: ExposedTable[];
+  blockedTables: string[];
   tablesFound: number;
   openTables: number;
 }
@@ -240,77 +241,122 @@ function ExposedDataCard({ item }: { item: ExposedDataItem }) {
         </div>
       </div>
 
-      {/* Database: show actual table data */}
-      {item.kind === 'database' && item.dataLeaks && tables.length > 0 && (
+      {/* Database: full breakdown of accessible + blocked tables */}
+      {item.kind === 'database' && item.dataLeaks && (
         <div className="border-t border-red-200">
-          {/* Context bar */}
-          <div className="px-4 py-2 bg-red-100 flex items-center gap-2 text-xs text-red-800 font-medium">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-            </svg>
-            We queried your live database using the anon key found in your JavaScript.
-            Showing real rows — emails partially redacted.
+          {/* "Because your token is exposed" context bar */}
+          <div className="px-4 py-3 bg-red-100 border-b border-red-200">
+            <p className="text-xs text-red-900 font-semibold mb-1">
+              Because your token is exposed in your JavaScript, anyone can run this:
+            </p>
+            <code className="text-xs bg-red-50 border border-red-200 rounded px-2 py-1 block text-red-800 font-mono overflow-x-auto">
+              fetch(&apos;{item.dataLeaks.supabaseUrl}/rest/v1/[table]&apos;, {`{ headers: { apikey: '${item.dataLeaks.keyPreview}' } }`})
+            </code>
           </div>
 
-          {/* Table tabs */}
-          <div className="flex border-b border-red-200 bg-white overflow-x-auto">
-            {tables.map(table => (
-              <button
-                key={table.name}
-                onClick={() => setExpandedTable(table.name)}
-                className={`px-4 py-2.5 text-sm font-semibold whitespace-nowrap border-b-2 transition-colors flex items-center gap-2 ${
-                  activeTable === table.name
-                    ? 'border-red-500 text-red-700 bg-red-50'
-                    : 'border-transparent text-slate-500 hover:text-slate-700'
-                }`}
-              >
-                🗄️ {table.name}
-                {table.totalRows !== undefined && (
-                  <span className="text-xs bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-full font-bold">
-                    {table.totalRows.toLocaleString()}
-                  </span>
+          {/* Table tabs — all accessible tables */}
+          {item.dataLeaks.tables.length > 0 && (
+            <>
+              <div className="flex border-b border-slate-200 bg-white overflow-x-auto">
+                {item.dataLeaks.tables.map(table => {
+                  const hasData = table.sampleRows.length > 0;
+                  return (
+                    <button
+                      key={table.name}
+                      onClick={() => setExpandedTable(table.name)}
+                      className={`px-4 py-2.5 text-sm font-semibold whitespace-nowrap border-b-2 transition-colors flex items-center gap-2 ${
+                        activeTable === table.name
+                          ? 'border-red-500 text-red-700 bg-red-50'
+                          : 'border-transparent text-slate-500 hover:text-slate-700'
+                      }`}
+                    >
+                      <span>{hasData ? '🔴' : '🟡'}</span>
+                      {table.name}
+                      {table.totalRows !== undefined && (
+                        <span className={`text-xs px-1.5 py-0.5 rounded-full font-bold ${
+                          hasData ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-500'
+                        }`}>
+                          {table.totalRows.toLocaleString()} rows
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+                {/* Protected tables indicator */}
+                {item.dataLeaks.blockedTables?.length > 0 && (
+                  <div className="px-4 py-2.5 text-xs text-slate-400 whitespace-nowrap flex items-center gap-1">
+                    🟢 {item.dataLeaks.blockedTables.length} protected by RLS
+                  </div>
                 )}
-              </button>
-            ))}
-          </div>
-
-          {/* Table data */}
-          {tables.map(table => activeTable === table.name && (
-            <div key={table.name} className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-slate-50 border-b border-slate-100">
-                    {table.columns.map(col => (
-                      <th key={col} className="px-4 py-2.5 text-left text-xs font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap font-mono">
-                        {col}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50 bg-white">
-                  {table.sampleRows.map((row, ri) => (
-                    <tr key={ri} className="hover:bg-slate-50">
-                      {table.columns.map(col => {
-                        const val = redactValue(col, row[col]);
-                        return (
-                          <td key={col} className={`px-4 py-2.5 whitespace-nowrap font-mono text-xs ${val === '●●●●●●●●' ? 'text-slate-300' : 'text-slate-700'}`}>
-                            {val}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div className="px-4 py-2.5 bg-white border-t border-slate-100 text-xs text-slate-500 flex items-center justify-between">
-                <span>Showing {table.sampleRows.length} of {table.totalRows?.toLocaleString() ?? '?'} rows</span>
-                <a href="https://supabase.com/docs/guides/auth/row-level-security" target="_blank" rel="noopener noreferrer"
-                  className="text-orange-600 font-semibold hover:text-orange-700">
-                  How to fix with RLS →
-                </a>
               </div>
-            </div>
-          ))}
+
+              {/* Active table content */}
+              {item.dataLeaks.tables.map(table => activeTable === table.name && (
+                <div key={table.name}>
+                  {table.sampleRows.length > 0 ? (
+                    <>
+                      <div className="px-4 py-2 bg-red-50 border-b border-red-100 text-xs text-red-700">
+                        <strong>Live data from your database</strong> — queried with your public anon key. Emails partially redacted.
+                        {table.totalRows !== undefined && table.totalRows > 3 && (
+                          <> Showing 3 of {table.totalRows.toLocaleString()} rows.</>
+                        )}
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="bg-slate-50 border-b border-slate-100">
+                              {table.columns.map(col => (
+                                <th key={col} className="px-4 py-2.5 text-left text-xs font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap font-mono">
+                                  {col}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-50 bg-white">
+                            {table.sampleRows.map((row, ri) => (
+                              <tr key={ri} className="hover:bg-slate-50">
+                                {table.columns.map(col => {
+                                  const val = redactValue(col, row[col]);
+                                  return (
+                                    <td key={col} className={`px-4 py-2.5 whitespace-nowrap font-mono text-xs ${val === '●●●●●●●●' ? 'text-slate-300' : 'text-slate-700'}`}>
+                                      {val}
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="px-4 py-4 bg-amber-50 border-b border-amber-100">
+                      <p className="text-xs text-amber-800 font-semibold mb-2">
+                        Table is accessible but returned 0 rows (may be empty or filtered by RLS).
+                        Schema is still visible:
+                      </p>
+                      {table.columns.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {table.columns.map(col => (
+                            <span key={col} className="font-mono text-xs bg-white border border-amber-200 px-2 py-0.5 rounded text-amber-800">
+                              {col}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <div className="px-4 py-2.5 bg-white border-t border-slate-100 text-xs text-slate-500 flex items-center justify-between">
+                    <span className="font-mono text-slate-400">{item.dataLeaks.supabaseUrl}/rest/v1/{table.name}</span>
+                    <a href="https://supabase.com/docs/guides/auth/row-level-security" target="_blank" rel="noopener noreferrer"
+                      className="text-orange-600 font-semibold hover:text-orange-700 whitespace-nowrap ml-4">
+                      Fix with RLS →
+                    </a>
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
         </div>
       )}
     </div>
@@ -664,12 +710,16 @@ function ScanPageInner() {
     }
   }
 
-  // Pull Supabase live table data
-  if (report.dataLeaks && report.dataLeaks.openTables > 0) {
+  // Pull Supabase live table data — show if ANY tables are accessible
+  if (report.dataLeaks && (report.dataLeaks.openTables > 0 || report.dataLeaks.tables.length > 0)) {
+    const dl = report.dataLeaks;
+    const accessible = dl.tables.length;
+    const withData = dl.openTables;
+    const blocked = dl.blockedTables?.length ?? 0;
     exposedItems.push({
       kind: 'database',
-      label: `Live database — ${report.dataLeaks.openTables} open ${report.dataLeaks.openTables === 1 ? 'table' : 'tables'}`,
-      description: `Anyone with your anon key can query ${report.dataLeaks.openTables} table(s) — no login required.`,
+      label: `Supabase database accessible via exposed token`,
+      description: `${accessible} table${accessible !== 1 ? 's' : ''} queryable with your public anon key.${withData > 0 ? ` ${withData} returning live rows.` : ''} ${blocked > 0 ? `${blocked} protected by RLS.` : ''}`,
       severity: 'critical',
       dataLeaks: report.dataLeaks,
     });

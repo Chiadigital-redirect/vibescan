@@ -45,6 +45,7 @@ export interface DataLeaks {
   supabaseUrl: string;
   keyPreview: string;
   tables: ExposedTable[];
+  blockedTables: string[];
   tablesFound: number;
   openTables: number;
 }
@@ -428,8 +429,10 @@ async function checkCors(baseUrl: string): Promise<{ open: boolean; header: stri
 async function checkSupabaseDataExposure(supabaseUrl: string, anonKey: string): Promise<DataLeaks | null> {
   const cleanUrl = supabaseUrl.replace(/\/$/, '');
 
-  // 1. Fetch OpenAPI spec to discover table names
+  // 1. Fetch OpenAPI spec to discover ALL table names + column schemas
   let tableNames: string[] = [];
+  const columnSchemas: Record<string, string[]> = {};
+
   try {
     const specRes = await fetchWithTimeout(`${cleanUrl}/rest/v1/`, {
       headers: {
@@ -441,23 +444,29 @@ async function checkSupabaseDataExposure(supabaseUrl: string, anonKey: string): 
 
     if (specRes.ok) {
       const spec = await specRes.json() as {
-        definitions?: Record<string, unknown>;
-        paths?: Record<string, unknown>;
+        definitions?: Record<string, { properties?: Record<string, unknown> }>;
       };
-      // Supabase returns Swagger spec with table names as definitions
       if (spec.definitions) {
-        tableNames = Object.keys(spec.definitions).filter(name => {
-          // Filter out Supabase internal/view names
-          return !name.startsWith('_') && !name.includes('pg_') && !name.includes('information_schema');
-        }).slice(0, 8); // Check up to 8 tables
+        tableNames = Object.keys(spec.definitions).filter(name =>
+          !name.startsWith('_') && !name.includes('pg_') && !name.includes('information_schema')
+        ).slice(0, 12);
+
+        // Extract column names from the schema definitions
+        for (const tableName of tableNames) {
+          const def = spec.definitions[tableName];
+          if (def?.properties) {
+            columnSchemas[tableName] = Object.keys(def.properties);
+          }
+        }
       }
     }
   } catch {}
 
   if (tableNames.length === 0) return null;
 
-  // 2. For each table, try to fetch sample rows
+  // 2. For each table, try to fetch sample rows AND get exact count
   const tables: ExposedTable[] = [];
+  const blockedTables: string[] = [];
 
   const tableChecks = tableNames.map(async (tableName) => {
     try {
@@ -474,7 +483,10 @@ async function checkSupabaseDataExposure(supabaseUrl: string, anonKey: string): 
         6000
       );
 
-      if (!res.ok) return;
+      if (!res.ok) {
+        blockedTables.push(tableName);
+        return;
+      }
 
       const rows = await res.json() as Record<string, unknown>[];
       const countHeader = res.headers.get('content-range');
@@ -490,32 +502,35 @@ async function checkSupabaseDataExposure(supabaseUrl: string, anonKey: string): 
           columns: Object.keys(rows[0]),
           sampleRows: rows,
           totalRows,
-          rls: false, // Data returned = RLS not blocking
+          rls: false,
         });
-      } else if (Array.isArray(rows) && rows.length === 0) {
-        // Empty table — still accessible, check if we can get schema
+      } else if (Array.isArray(rows)) {
+        // Empty or RLS returning empty — still accessible, show schema from spec
+        const cols = columnSchemas[tableName] || [];
         tables.push({
           name: tableName,
-          columns: [],
+          columns: cols,
           sampleRows: [],
-          totalRows: 0,
+          totalRows: totalRows ?? 0,
           rls: false,
         });
       }
-    } catch {}
+    } catch {
+      blockedTables.push(tableName);
+    }
   });
 
   await Promise.allSettled(tableChecks);
 
-  // Only include tables with actual data (non-empty)
-  const openTables = tables.filter(t => t.sampleRows.length > 0);
+  const openTables = tables.filter(t => t.sampleRows.length > 0).length;
 
   return {
     supabaseUrl: cleanUrl,
-    keyPreview: anonKey.substring(0, 12) + '...',
-    tables: openTables.length > 0 ? openTables : tables.filter(t => t.columns.length === 0).slice(0, 3),
+    keyPreview: anonKey.substring(0, 20) + '...',
+    tables,           // ALL accessible tables (with and without data)
+    blockedTables,    // Tables where RLS blocked access
     tablesFound: tableNames.length,
-    openTables: openTables.length,
+    openTables,
   };
 }
 
@@ -708,14 +723,15 @@ async function runScan(baseUrl: string) {
       try {
         dataLeaks = await checkSupabaseDataExposure(supabaseFinding.supabaseUrl, supabaseFinding.supabaseKey);
 
-        if (dataLeaks && dataLeaks.openTables > 0) {
+        if (dataLeaks && (dataLeaks.openTables > 0 || dataLeaks.tables.length > 0)) {
+          const accessibleCount = dataLeaks.tables.length;
           checks.push({
             id: 'supabase-data-exposure',
             category: 'secrets',
-            name: 'Live Database Rows Exposed',
+            name: 'Database Accessible via Exposed Token',
             status: 'critical',
-            detail: `${dataLeaks.openTables} Supabase ${dataLeaks.openTables === 1 ? 'table' : 'tables'} are returning real data to anyone with your anon key. Row Level Security (RLS) is not protecting these tables.`,
-            value: `${dataLeaks.openTables} open tables`,
+            detail: `${accessibleCount} ${accessibleCount === 1 ? 'table' : 'tables'} accessible with your public anon key. ${dataLeaks.openTables > 0 ? `${dataLeaks.openTables} returning live rows.` : ''} ${dataLeaks.blockedTables?.length > 0 ? `${dataLeaks.blockedTables.length} protected by RLS.` : ''}`,
+            value: `${accessibleCount} accessible tables`,
           });
         }
       } catch {}
