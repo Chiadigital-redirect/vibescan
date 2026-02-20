@@ -110,24 +110,70 @@ async function discoverUrls(baseUrl: string): Promise<string[]> {
     }
   } catch {}
 
-  // 3. Homepage links
+  // 3. Homepage — extract links AND JS bundle URLs
+  let jsBundleUrls: string[] = [];
   try {
     const res = await fetchWithTimeout(baseUrl, {}, 5000);
     if (res.ok) {
       const text = await res.text();
+
+      // Anchor links
       const hrefMatches = text.match(/href=["']([^"']+)["']/g) || [];
       hrefMatches.forEach(m => {
         const href = m.replace(/href=["']/, '').replace(/["']$/, '');
-        if (href.startsWith('/') && !href.startsWith('//')) {
+        if (href.startsWith('/') && !href.startsWith('//') && !href.endsWith('.css') && !href.endsWith('.ico')) {
           urls.add(`${origin}${href}`);
         } else if (href.startsWith(origin)) {
           urls.add(href);
         }
       });
+
+      // Collect JS bundle src paths for route extraction
+      const scriptMatches = text.match(/src=["']([^"']+\.js[^"']*)["']/g) || [];
+      for (const m of scriptMatches) {
+        const src = m.replace(/src=["']/, '').replace(/["']$/, '');
+        if (src.includes('cdn.') || src.includes('googleapis') || src.includes('analytics')) continue;
+        const fullUrl = src.startsWith('/') ? `${origin}${src}` : src.startsWith('http') ? src : `${origin}/${src}`;
+        jsBundleUrls.push(fullUrl);
+      }
     }
   } catch {}
 
-  return Array.from(urls).sort().slice(0, 50);
+  // 4. JS bundle route extraction — finds routes in SPAs (React Router, Next.js, Vue Router, etc.)
+  //    Looks for quoted path strings like "/about", "/dashboard/settings" etc.
+  const routePathPattern = /"(\/[a-z][a-z0-9]*(?:\/[a-z][a-z0-9-]*){0,4})"/g;
+  const skippedPrefixes = ['/api/', '/assets/', '/static/', '/_next/', '/fonts/', '/images/', '/_vercel'];
+
+  for (const bundleUrl of jsBundleUrls.slice(0, 4)) {
+    try {
+      const jsRes = await fetchWithTimeout(bundleUrl, {}, 6000);
+      if (!jsRes.ok) continue;
+      const js = await jsRes.text();
+      // Skip very small files (likely not the main bundle) or files with no routes
+      if (js.length < 5000) continue;
+
+      let match: RegExpExecArray | null;
+      routePathPattern.lastIndex = 0;
+      while ((match = routePathPattern.exec(js)) !== null) {
+        const path = match[1];
+        // Filter out false positives (CSS classes, short strings, asset paths)
+        if (path.length < 2) continue;
+        if (skippedPrefixes.some(p => path.startsWith(p))) continue;
+        if (path.includes('.') && !path.endsWith('/')) continue; // skip filenames like /foo.bar
+        urls.add(`${origin}${path}`);
+      }
+    } catch {}
+  }
+
+  // Deduplicate and return — sort warnings/interesting paths first
+  const result = Array.from(urls)
+    .filter(u => {
+      try { return new URL(u).hostname === new URL(origin).hostname; } catch { return false; }
+    })
+    .sort()
+    .slice(0, 60);
+
+  return result;
 }
 
 // Content validators — confirm the response is actually the sensitive file, not an SPA catch-all
